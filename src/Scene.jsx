@@ -1,9 +1,38 @@
 import React, { useMemo, useState, useEffect, useRef, Suspense } from "react"
 import { useTexture, PositionalAudio, MeshReflectorMaterial, Text, Environment, Html, useGLTF } from "@react-three/drei"
 import { useFrame, useThree } from '@react-three/fiber'
-import { useBox, usePlane } from "@react-three/cannon"
+import { useBox, usePlane, useCompoundBody } from "@react-three/cannon"
 import * as THREE from 'three'
 import { useStore } from './Store'
+
+// --- SLOPED PHYSICS ---
+const CouchSlope = ({ position, rotation = [0, 0, 0] }) => {
+  const [ref] = useCompoundBody(() => ({
+    type: "Static",
+    position,
+    rotation,
+    material: { friction: 0 },
+    shapes: [
+      { type: "Box", position: [0, 0, 0], args: [2.55, 0.55, 1.6] }, // Core
+      { type: "Box", position: [0, -0.15, 0.8], rotation: [Math.PI / 6, 0, 0], args: [2.55, 0.1, 0.8] }, // Front Slope
+      { type: "Box", position: [0, -0.15, -0.8], rotation: [-Math.PI / 6, 0, 0], args: [2.55, 0.1, 0.8] } // Back Slope
+    ]
+  }))
+  return <group ref={ref} />
+}
+
+const StageSlope = ({ position }) => {
+  const [ref] = useCompoundBody(() => ({
+    type: "Static",
+    position,
+    material: { friction: 0 },
+    shapes: [
+      { type: "Box", position: [0, 0, 0], args: [8.5, 0.3, 3.5] }, // Core
+      { type: "Box", position: [0, -0.1, 1.8], rotation: [Math.PI / 8, 0, 0], args: [8.5, 0.1, 1.2] } // Front Ramp
+    ]
+  }))
+  return <group ref={ref} />
+}
 
 // --- ENVIRONMENT GEOMETRY ---
 
@@ -198,10 +227,6 @@ const Lounge = ({ position }) => {
   const couch1 = useMemo(() => gltf.scene.clone(), [gltf.scene])
   const couch2 = useMemo(() => gltf.scene.clone(), [gltf.scene])
 
-  // Flush couch physics engineered strictly to height=0.55 acting as a true cushion 'Floor', extended into the wall to block camera clipping.
-  useBox(() => ({ type: "Static", position: [position[0] + 0.5, 0.35, position[2] - 3.0], args: [2.55, 0.55, 2.0], material: { friction: 0.1 } }))
-  useBox(() => ({ type: "Static", position: [position[0] - 4.6, 0.35, position[2]], rotation: [0, Math.PI/2, 0], args: [2.55, 0.55, 2.0], material: { friction: 0.1 } }))
-
   useMemo(() => {
     const applyMatteNavy = (n) => { 
       if (n.isMesh) { 
@@ -220,6 +245,9 @@ const Lounge = ({ position }) => {
 
   return (
     <group position={position}>
+      <CouchSlope position={[position[0] + 0.5, 0.35, position[2] - 3.0]} />
+      <CouchSlope position={[position[0] - 4.6, 0.35, position[2]]} rotation={[0, Math.PI/2, 0]} />
+
       {/* Rug */}
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[10.4, 7.8]} />
@@ -355,11 +383,8 @@ const DJBooth = ({ position, sharedPhotoTexture }) => {
   }, [isNearBooth, isPlaying, spotifyToken, deviceId])
 
   // DJ Booth physical structures
-  // 1. Smooth, low-profile stage step to guarantee zero camera tripping physics
-  useBox(() => ({ type: "Static", position: [position[0], 0.15, position[2]], args: [8.5, 0.3, 4.5], material: { friction: 0.1 } }))
-  
   // 2. High wall for the table to prevent climbing
-  useBox(() => ({ type: "Static", position: [position[0], 1.2, position[2] + 0.5], args: [3, 1, 1] }))
+  useBox(() => ({ type: "Static", position: [position[0], 1.2, position[2] + 0.5], args: [3, 1, 1], material: { friction: 0 } }))
 
   useMemo(() => {
     deck1.traverse((n) => { 
@@ -377,6 +402,8 @@ const DJBooth = ({ position, sharedPhotoTexture }) => {
 
   return (
   <group position={position} ref={groupRef} name="DJ_Booth">
+    <StageSlope position={[position[0], 0.15, position[2]]} />
+    
     {/* Stage */}
     <mesh position={[0, 0.2, 0]} receiveShadow castShadow>
       <boxGeometry args={[8, 0.4, 4]} />

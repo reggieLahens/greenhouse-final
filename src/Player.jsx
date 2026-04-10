@@ -45,7 +45,9 @@ export const Player = ({ shirtColor = 'white' }) => {
     position: [0, 5, 8], 
     args: [1.0],
     angularFactor: [0, 0, 0],
-    linearDamping: 0.5
+    linearDamping: 0.5,
+    material: { friction: 0 },
+    stepHeight: 1.5 // Extreme engine climbing override
   }), useRef())
   const keys = usePlayerControls()
   
