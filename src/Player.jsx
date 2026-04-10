@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, ContactShadows } from '@react-three/drei'
 import { useSphere } from '@react-three/cannon'
 import * as THREE from 'three'
+import { useStore } from './Store'
 
 const usePlayerControls = () => {
   const keys = useRef({ forward: false, backward: false, left: false, right: false })
@@ -31,6 +32,7 @@ const usePlayerControls = () => {
 
 export const Player = ({ shirtColor = 'white' }) => {
   const { camera } = useThree()
+  const isOnboardingComplete = useStore(state => state.isOnboardingComplete)
   const visualRef = useRef()
   const leftArmRef = useRef()
   const rightArmRef = useRef()
@@ -60,7 +62,12 @@ export const Player = ({ shirtColor = 'white' }) => {
 
   useFrame((state) => {
     const defaultSpeed = 5
-    const { forward, backward, left, right } = keys.current
+    let { forward, backward, left, right } = keys.current
+
+    // Lock controls during onboarding
+    if (!isOnboardingComplete) {
+      forward = backward = left = right = false;
+    }
 
     // Calculate camera-relative movement
     const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
@@ -123,11 +130,12 @@ export const Player = ({ shirtColor = 'white' }) => {
         maxDistance={5} 
         maxPolarAngle={Math.PI / 2 - 0.05} // No going under the floor
         enablePan={false}
+        enabled={isOnboardingComplete}
         makeDefault
       />
-      <group ref={ref}>
+      <group ref={ref} name="PlayerBody">
         <ContactShadows position={[0, -0.99, 0]} opacity={0.6} scale={2} blur={1.5} far={1} />
-        <group ref={visualRef} position={[0, -1.0, 0]}>  
+        <group ref={visualRef} position={[0, -0.85, 0]}>  
          {/* Head (Black Cap) */}
          <mesh position={[0, 1.45, 0.05]} castShadow rotation={[0.1, 0, 0]}>
            <cylinderGeometry args={[0.22, 0.22, 0.12, 16]} />

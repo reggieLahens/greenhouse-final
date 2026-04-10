@@ -3,6 +3,7 @@ import { useTexture, PositionalAudio, MeshReflectorMaterial, Text, Environment, 
 import { useFrame, useThree } from '@react-three/fiber'
 import { useBox, usePlane } from "@react-three/cannon"
 import * as THREE from 'three'
+import { useStore } from './Store'
 
 // --- ENVIRONMENT GEOMETRY ---
 
@@ -197,10 +198,9 @@ const Lounge = ({ position }) => {
   const couch1 = useMemo(() => gltf.scene.clone(), [gltf.scene])
   const couch2 = useMemo(() => gltf.scene.clone(), [gltf.scene])
 
-  // Invisible physics colliders bound to world space utilizing dynamic Lounge offset
-  // Set Y-bounds exactly at 0.8 height to support standing natively on the visual cushions
-  useBox(() => ({ type: "Static", position: [position[0], 0.4, position[2] - 2.6], args: [2.55, 0.8, 1.25] }))
-  useBox(() => ({ type: "Static", position: [position[0] - 4.2, 0.4, position[2]], rotation: [0, Math.PI/2, 0], args: [2.55, 0.8, 1.25] }))
+  // Flush couch physics engineered strictly to height=0.55 acting as a true cushion 'Floor', extended into the wall to block camera clipping.
+  useBox(() => ({ type: "Static", position: [position[0] + 0.5, 0.35, position[2] - 3.0], args: [2.55, 0.55, 2.0], material: { friction: 0.1 } }))
+  useBox(() => ({ type: "Static", position: [position[0] - 4.6, 0.35, position[2]], rotation: [0, Math.PI/2, 0], args: [2.55, 0.55, 2.0], material: { friction: 0.1 } }))
 
   useMemo(() => {
     const applyMatteNavy = (n) => { 
@@ -268,10 +268,95 @@ const Houseplant = ({ position }) => {
 const DJBooth = ({ position, sharedPhotoTexture }) => {
   const cdjGltf = useGLTF('/2cdj.glb')
   const deck1 = useMemo(() => cdjGltf.scene.clone(), [cdjGltf.scene])
+  
+  const groupRef = useRef()
+  const { camera, scene } = useThree()
+  const isRecordCrateOpen = useStore(state => state.isRecordCrateOpen)
+  const setRecordCrateOpen = useStore(state => state.setRecordCrateOpen)
+  const isNearBooth = useStore(state => state.isNearBooth)
+  const setIsNearBooth = useStore(state => state.setIsNearBooth)
+  const isPlaying = useStore(state => state.isPlaying)
+  const currentTrack = useStore(state => state.currentTrack)
+  const spotifyToken = useStore(state => state.spotifyToken)
+  const deviceId = useStore(state => state.deviceId)
+
+  useFrame(() => {
+    const boothObj = scene.getObjectByName('DJ_Booth');
+    if (boothObj) {
+      const boothWorldPos = new THREE.Vector3();
+      boothObj.getWorldPosition(boothWorldPos);
+      
+      const targetPos = new THREE.Vector3();
+      const playerBody = scene.getObjectByName('PlayerBody');
+      if (playerBody) {
+        playerBody.getWorldPosition(targetPos);
+      } else {
+        camera.getWorldPosition(targetPos);
+      }
+      
+      const dist = targetPos.distanceTo(boothWorldPos);
+
+      // Exact 5.0 meter trigger threshold
+      if (dist < 5.0) {
+        if (!isNearBooth) setIsNearBooth(true);
+      } else {
+        if (isNearBooth) setIsNearBooth(false);
+      }
+    }
+
+    if (isPlaying && deck1) {
+      deck1.traverse((n) => {
+        const name = n.name.toLowerCase();
+        if (name.includes('vinyl') || name.includes('platter') || name.includes('disc')) {
+          n.rotation.y -= 0.02; // Native Vinyl Spin
+        }
+      })
+    }
+  })
+
+  const triggerSkip = (direction) => {
+    if (!spotifyToken || !deviceId) return;
+    if (direction === 'previous') {
+       fetch(`https://api.spotify.com/v1/me/player/previous?device_id=${deviceId}`, {
+         method: 'POST',
+         headers: { 'Authorization': `Bearer ${spotifyToken}` }
+       }).catch(err => console.error("Prev Failed", err));
+    } else {
+       if (isPlaying) {
+         fetch(`https://api.spotify.com/v1/me/player/next?device_id=${deviceId}`, {
+           method: 'POST',
+           headers: { 'Authorization': `Bearer ${spotifyToken}` }
+         }).catch(err => console.error("Skip Failed", err));
+       } else {
+         fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+           method: 'PUT',
+           headers: { 'Authorization': `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
+           body: JSON.stringify({ context_uri: "spotify:playlist:6OIJBWbvgbXcF45q0DwEvD" })
+         }).catch(err => console.error("Play Failed", err));
+       }
+    }
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const k = e.key.toLowerCase();
+
+      // Decoupled key commands - skip physically absolutely anywhere
+      if ((k === 'p' || k === '-') && isNearBooth) {
+        triggerSkip('previous');
+      }
+
+      if ((k === 'n' || k === '+' || k === '=') && isNearBooth) {
+        triggerSkip('next');
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isNearBooth, isPlaying, spotifyToken, deviceId])
 
   // DJ Booth physical structures
-  // 1. Fixed stage platform to stop bleeding (elevated to flawlessly clear boots)
-  useBox(() => ({ type: "Static", position: [position[0], 0.3, position[2]], args: [8, 0.4, 4] }))
+  // 1. Smooth, low-profile stage step to guarantee zero camera tripping physics
+  useBox(() => ({ type: "Static", position: [position[0], 0.15, position[2]], args: [8.5, 0.3, 4.5], material: { friction: 0.1 } }))
   
   // 2. High wall for the table to prevent climbing
   useBox(() => ({ type: "Static", position: [position[0], 1.2, position[2] + 0.5], args: [3, 1, 1] }))
@@ -291,7 +376,7 @@ const DJBooth = ({ position, sharedPhotoTexture }) => {
   }, [deck1])
 
   return (
-  <group position={position}>
+  <group position={position} ref={groupRef} name="DJ_Booth">
     {/* Stage */}
     <mesh position={[0, 0.2, 0]} receiveShadow castShadow>
       <boxGeometry args={[8, 0.4, 4]} />
@@ -310,6 +395,17 @@ const DJBooth = ({ position, sharedPhotoTexture }) => {
     
     {/* Centralized Upscaled CDJ Deck */}
     <primitive object={deck1} position={[0, 1.7, 0.5]} scale={[0.25, 0.25, 0.25]} rotation={[0, 0, 0]} />
+
+    {/* Plan B: Dynamic Track Overlay directly hovering above the CDJ hardware */}
+    {currentTrack && (
+      <mesh position={[0, 2.3, 0.5]} rotation={[-Math.PI / 6, 0, 0]}>
+        <planeGeometry args={[2.0, 0.4]} />
+        <meshStandardMaterial color="#111" emissive="#111" emissiveIntensity={0.5} />
+        <Text position={[0, 0, 0.02]} fontSize={0.15} color="#1DB954" anchorX="center" anchorY="middle" maxWidth={1.8} textAlign="center">
+          {currentTrack.name.toUpperCase()}
+        </Text>
+      </mesh>
+    )}
 
     {/* Large Screen */}
     <mesh position={[0, 3, -1.5]} castShadow>
@@ -346,9 +442,9 @@ const PhotoBooth = ({ position, setWebcamActive, sharedPhotoTexture }) => {
   useFrame(() => {
     if (groupRef.current) {
       const dist = camera.position.distanceTo(groupRef.current.position)
-      const isNear = dist < 6
-      if (isNear !== inRange) {
-        setInRange(isNear)
+      const isNearPhotoBooth = dist < 6
+      if (isNearPhotoBooth !== inRange) {
+        setInRange(isNearPhotoBooth)
       }
     }
   })
@@ -406,9 +502,9 @@ const CustomLab = ({ position, rotation, setShirtColor }) => {
   useFrame(() => {
     if (groupRef.current) {
       const dist = camera.position.distanceTo(groupRef.current.position)
-      const isNear = dist < 8
-      if (isNear !== inRange) {
-        setInRange(isNear)
+      const isNearCustomLab = dist < 8
+      if (isNearCustomLab !== inRange) {
+        setInRange(isNearCustomLab)
       }
     }
   })
@@ -476,7 +572,15 @@ const generateFoliageCluster = (count) => {
 }
 
 export const Scene = ({ clicked, shirtColor, setShirtColor, setWebcamActive, capturedPhoto }) => {
+  const isPlaying = useStore(state => state.isPlaying);
   const [sharedPhotoTexture, setSharedPhotoTexture] = useState(null);
+  const audioRef = useRef();
+
+  useEffect(() => {
+    if (isPlaying && audioRef.current && audioRef.current.isPlaying) {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     if (capturedPhoto) {
@@ -537,7 +641,7 @@ export const Scene = ({ clicked, shirtColor, setShirtColor, setWebcamActive, cap
       <group position={[5, 10, 5]}>{generateFoliageCluster(5)}</group>
       <group position={[0, 12, -8]}>{generateFoliageCluster(5)}</group>
 
-      {clicked && <PositionalAudio url="/Sway_of_the_Palms.mp3" distance={15} loop autoplay />}
+      {clicked && !isPlaying && <PositionalAudio ref={audioRef} url="/Sway_of_the_Palms.mp3" distance={15} loop autoplay />}
     </>
   )
 }
